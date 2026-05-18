@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+aiofiles
+uuid
+numpy
+soundfile
+voxcpm
