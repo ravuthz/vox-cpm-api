@@ -21,6 +21,8 @@ This project provides a FastAPI-based queue system for the [VoxCPM](https://gith
    pip install voxcpm
    ```
    _Note: If VoxCPM is not installed, the API will run in MOCK mode for testing._
+   You can also force mock mode with `VOXCPM_MOCK=1`; use `VOXCPM_MOCK_DELAY=0`
+   for fast local smoke tests.
 
 ## Running the API
 

@@ -3,7 +3,6 @@ uvicorn
 python-multipart
 pydantic
 aiofiles
-uuid
 numpy
 soundfile
 torch

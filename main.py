@@ -8,6 +8,12 @@ from manager import manager
 
 app = FastAPI(title="VoxCPM TTS Queue API")
 
+
+def _upload_path(job_id: str, label: str, filename: Optional[str]) -> str:
+    suffix = os.path.splitext(filename or "")[1].lower() or ".wav"
+    return os.path.join(manager.upload_dir, f"{job_id}_{label}{suffix}")
+
+
 @app.post("/tts/ultimate-cloning", response_model=JobResponse)
 async def ultimate_cloning(
     background_tasks: BackgroundTasks,
@@ -18,21 +24,38 @@ async def ultimate_cloning(
     cfg_value: float = Form(2.0),
     inference_timesteps: int = Form(10)
 ):
+    if not text.strip():
+        raise HTTPException(status_code=400, detail="text must not be empty")
+    if not prompt_text.strip():
+        raise HTTPException(status_code=400, detail="prompt_text must not be empty")
+    if cfg_value <= 0:
+        raise HTTPException(status_code=400, detail="cfg_value must be greater than 0")
+    if inference_timesteps <= 0:
+        raise HTTPException(status_code=400, detail="inference_timesteps must be greater than 0")
+
+    prompt_content = await prompt_wav.read()
+    if not prompt_content:
+        raise HTTPException(status_code=400, detail="prompt_wav must not be empty")
+
+    reference_content = None
+    if reference_wav and reference_wav.filename:
+        reference_content = await reference_wav.read()
+        if not reference_content:
+            raise HTTPException(status_code=400, detail="reference_wav must not be empty")
+
     # 1. Create a job ID
     job_id = await manager.create_job()
     
     # 2. Save uploaded files
-    prompt_wav_path = os.path.join(manager.upload_dir, f"{job_id}_prompt.wav")
+    prompt_wav_path = _upload_path(job_id, "prompt", prompt_wav.filename)
     async with aiofiles.open(prompt_wav_path, 'wb') as out_file:
-        content = await prompt_wav.read()
-        await out_file.write(content)
+        await out_file.write(prompt_content)
         
     ref_wav_path = None
-    if reference_wav and reference_wav.filename:
-        ref_wav_path = os.path.join(manager.upload_dir, f"{job_id}_ref.wav")
+    if reference_content is not None:
+        ref_wav_path = _upload_path(job_id, "ref", reference_wav.filename)
         async with aiofiles.open(ref_wav_path, 'wb') as out_file:
-            content = await reference_wav.read()
-            await out_file.write(content)
+            await out_file.write(reference_content)
 
     # 3. Add task to background
     background_tasks.add_task(
@@ -74,9 +97,12 @@ async def download_result(job_id: str):
     job = manager.get_job_status(job_id)
     if not job or job["status"] != JobStatus.COMPLETED:
         raise HTTPException(status_code=404, detail="Result not found or job not completed")
+    result_path = job.get("result_path")
+    if not result_path or not os.path.isfile(result_path):
+        raise HTTPException(status_code=404, detail="Result file not found")
     
     return FileResponse(
-        path=job["result_path"],
+        path=result_path,
         media_type="audio/wav",
         filename=f"output_{job_id}.wav"
     )
