@@ -14,27 +14,40 @@ logger = logging.getLogger(__name__)
 # Try to import VoxCPM, use a mock if not available
 try:
     from voxcpm import VoxCPM
+    import torch
 
     MODEL_AVAILABLE = True
 except ImportError:
     MODEL_AVAILABLE = False
-    logger.warning("VoxCPM not found. Running in MOCK mode.")
+    logger.warning("VoxCPM or torch not found. Running in MOCK mode.")
 
 
 class JobManager:
     def __init__(self, output_dir: str = "outputs", upload_dir: str = "uploads"):
         global MODEL_AVAILABLE
         self.jobs: Dict[str, Dict] = {}
-        self.output_dir = output_dir
-        self.upload_dir = upload_dir
-        os.makedirs(output_dir, exist_ok=True)
-        os.makedirs(upload_dir, exist_ok=True)
+        # Use absolute paths for reliability
+        self.output_dir = os.path.abspath(output_dir)
+        self.upload_dir = os.path.abspath(upload_dir)
+        os.makedirs(self.output_dir, exist_ok=True)
+        os.makedirs(self.upload_dir, exist_ok=True)
+
+        self.device = "cpu"
+        if MODEL_AVAILABLE:
+            if torch.cuda.is_available():
+                self.device = "cuda"
+            elif torch.backends.mps.is_available():
+                self.device = "mps"
+            logger.info(f"Device detected: {self.device}")
 
         self.model = None
         if MODEL_AVAILABLE:
             try:
-                self.model = VoxCPM.from_pretrained("openbmb/VoxCPM2")
-                logger.info("VoxCPM model loaded successfully.")
+                # Disable denoiser due to environment dependency issues (torchvision::nms)
+                self.model = VoxCPM.from_pretrained(
+                    "openbmb/VoxCPM2", load_denoiser=False, devices=self.device
+                )
+                logger.info("VoxCPM model loaded successfully (denoiser disabled).")
             except Exception as e:
                 logger.error(f"Failed to load VoxCPM model: {e}")
                 MODEL_AVAILABLE = False

@@ -6,4 +6,6 @@ aiofiles
 uuid
 numpy
 soundfile
+torch
+torchaudio
 voxcpm

@@ -28,7 +28,7 @@ async def ultimate_cloning(
         await out_file.write(content)
         
     ref_wav_path = None
-    if reference_wav:
+    if reference_wav and reference_wav.filename:
         ref_wav_path = os.path.join(manager.upload_dir, f"{job_id}_ref.wav")
         async with aiofiles.open(ref_wav_path, 'wb') as out_file:
             content = await reference_wav.read()
