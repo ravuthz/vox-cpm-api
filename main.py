@@ -163,7 +163,7 @@ async def submit_tts_job(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
     prompt_text: str = Form(""),
-    prompt_wav: UploadFile = File(None),
+    prompt_wav: UploadFile = File(...),
     reference_wav: Optional[UploadFile] = File(None),
     control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
