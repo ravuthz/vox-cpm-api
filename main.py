@@ -163,7 +163,7 @@ async def submit_tts_job(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
     prompt_text: str = Form(""),
-    prompt_wav: UploadFile = File(...),
+    prompt_wav: UploadFile = File(None),
     reference_wav: Optional[UploadFile] = File(None),
     control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
@@ -192,7 +192,10 @@ async def submit_tts_job(
     )
 
     return JobResponse(
-        job_id=job_id, status=JobStatus.PENDING, message="Job submitted successfully"
+        job_id=job_id,
+        status=JobStatus.PENDING,
+        message="Job submitted successfully",
+        process_url=f"/tts/job/{job_id}",
     )
 
 
@@ -253,10 +256,7 @@ async def tts_run(payload: TTSRequest):
     except Exception as error:
         raise HTTPException(
             status_code=500,
-            detail={
-                "success": False,
-                "error": str(error),
-            },
+            detail={"success": False, "error": str(error)},
         )
 
 
