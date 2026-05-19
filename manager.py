@@ -64,8 +64,6 @@ class JobManager:
         self,
         job_id: str,
         text: str,
-        prompt_text: str,
-        prompt_wav_path: str,
         reference_wav_path: str = None,
         control_instruction: str = "",
         cfg_value: float = 2.0,
@@ -73,12 +71,11 @@ class JobManager:
     ) -> str:
         output_filename = f"{job_id}.wav"
         output_path = os.path.join(self.output_dir, output_filename)
-        reference_path = reference_wav_path or prompt_wav_path
 
         await tts_service.generate_to_file(
             text=text,
             output_path=output_path,
-            reference_wav_path=reference_path,
+            reference_wav_path=reference_wav_path,
             control_instruction=control_instruction,
             cfg_value=cfg_value,
             inference_timesteps=inference_timesteps,
@@ -89,8 +86,6 @@ class JobManager:
         self,
         job_id: str,
         text: str,
-        prompt_text: str,
-        prompt_wav_path: str,
         reference_wav_path: str = None,
         control_instruction: str = "",
         cfg_value: float = 2.0,
@@ -102,8 +97,6 @@ class JobManager:
             output_path = await self.synthesize_to_file(
                 job_id=job_id,
                 text=text,
-                prompt_text=prompt_text,
-                prompt_wav_path=prompt_wav_path,
                 reference_wav_path=reference_wav_path,
                 control_instruction=control_instruction,
                 cfg_value=cfg_value,

@@ -19,7 +19,6 @@ class JobResponse(BaseModel):
 
 class UltimateCloningParams(BaseModel):
     text: str
-    prompt_text: str = ""
     control_instruction: str = ""
     cfg_value: float = 2.0
     inference_timesteps: int = 10

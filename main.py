@@ -23,9 +23,7 @@ def _sse(event: str, data: dict) -> str:
 
 async def _prepare_tts_job(
     text: str,
-    prompt_text: str,
-    prompt_wav: UploadFile,
-    reference_wav: Optional[UploadFile],
+    reference_wav: UploadFile,
     cfg_value: float,
     inference_timesteps: int,
 ):
@@ -38,49 +36,31 @@ async def _prepare_tts_job(
             status_code=400, detail="inference_timesteps must be greater than 0"
         )
 
-    prompt_content = await prompt_wav.read()
-    if not prompt_content:
-        raise HTTPException(status_code=400, detail="prompt_wav must not be empty")
-
-    reference_content = None
-    if reference_wav and reference_wav.filename:
-        reference_content = await reference_wav.read()
-        if not reference_content:
-            raise HTTPException(
-                status_code=400, detail="reference_wav must not be empty"
-            )
+    reference_content = await reference_wav.read()
+    if not reference_content:
+        raise HTTPException(status_code=400, detail="reference_wav must not be empty")
 
     # 1. Create a job ID
     job_id = await manager.create_job()
 
     # 2. Save uploaded files
-    prompt_wav_path = _upload_path(job_id, "prompt", prompt_wav.filename)
-    async with aiofiles.open(prompt_wav_path, "wb") as out_file:
-        await out_file.write(prompt_content)
+    ref_wav_path = _upload_path(job_id, "ref", reference_wav.filename)
+    async with aiofiles.open(ref_wav_path, "wb") as out_file:
+        await out_file.write(reference_content)
 
-    ref_wav_path = None
-    if reference_content is not None:
-        ref_wav_path = _upload_path(job_id, "ref", reference_wav.filename)
-        async with aiofiles.open(ref_wav_path, "wb") as out_file:
-            await out_file.write(reference_content)
-
-    return job_id, prompt_wav_path, ref_wav_path
+    return job_id, ref_wav_path
 
 
 @app.post("/tts/process")
 async def process_tts_stream(
     text: str = Form(...),
-    prompt_text: str = Form(""),
-    prompt_wav: UploadFile = File(...),
-    reference_wav: Optional[UploadFile] = File(None),
+    reference_wav: UploadFile = File(...),
     control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
     inference_timesteps: int = Form(10),
 ):
-    job_id, prompt_wav_path, ref_wav_path = await _prepare_tts_job(
+    job_id, ref_wav_path = await _prepare_tts_job(
         text=text,
-        prompt_text=prompt_text,
-        prompt_wav=prompt_wav,
         reference_wav=reference_wav,
         cfg_value=cfg_value,
         inference_timesteps=inference_timesteps,
@@ -118,8 +98,6 @@ async def process_tts_stream(
             manager.synthesize_to_file(
                 job_id=job_id,
                 text=text,
-                prompt_text=prompt_text,
-                prompt_wav_path=prompt_wav_path,
                 reference_wav_path=ref_wav_path,
                 control_instruction=control_instruction,
                 cfg_value=cfg_value,
@@ -158,21 +136,17 @@ async def process_tts_stream(
     )
 
 
-@app.post("/tts/ultimate-cloning", response_model=JobResponse)
+@app.post("/tts/submit", response_model=JobResponse)
 async def submit_tts_job(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
-    prompt_text: str = Form(""),
-    prompt_wav: UploadFile = File(...),
-    reference_wav: Optional[UploadFile] = File(None),
+    reference_wav: UploadFile = File(...),
     control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
     inference_timesteps: int = Form(10),
 ):
-    job_id, prompt_wav_path, ref_wav_path = await _prepare_tts_job(
+    job_id, ref_wav_path = await _prepare_tts_job(
         text=text,
-        prompt_text=prompt_text,
-        prompt_wav=prompt_wav,
         reference_wav=reference_wav,
         cfg_value=cfg_value,
         inference_timesteps=inference_timesteps,
@@ -183,8 +157,6 @@ async def submit_tts_job(
         manager.process_tts,
         job_id=job_id,
         text=text,
-        prompt_text=prompt_text,
-        prompt_wav_path=prompt_wav_path,
         reference_wav_path=ref_wav_path,
         control_instruction=control_instruction,
         cfg_value=cfg_value,

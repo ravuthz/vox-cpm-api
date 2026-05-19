@@ -70,7 +70,7 @@ class TTSService:
         return path.resolve()
 
     def resolve_output_file(self, file_path: str) -> Path:
-        path = Path(file_path)
+        path = Path("output", file_path)
         if not path.is_absolute():
             path = self.base_dir / path
         return path.resolve()
