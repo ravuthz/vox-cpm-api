@@ -1,31 +1,15 @@
 import os
-import time
 import json
 import asyncio
 import aiofiles
-from pathlib import Path
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Optional
-from schemas import JobResponse, JobStatus
+from schemas import JobResponse, JobStatus, TTSRequest
 from manager import manager
-
-from voxcpm import VoxCPM
-import soundfile as sf
-from pydantic import BaseModel
+from service import tts_service
 
 app = FastAPI(title="VoxCPM TTS Queue API")
-
-BASE_DIR = Path(__file__).resolve().parent
-
-
-class TTSRequest(BaseModel):
-    text: str
-    reference_file: str = "clone-voice.mp3"
-    control_instruction: str = ""
-    cfg_value: float = 2.0
-    inference_timesteps: int = 10
-    output_file: str = "result.wav"
 
 
 def _upload_path(job_id: str, label: str, filename: Optional[str]) -> str:
@@ -47,8 +31,6 @@ async def _prepare_tts_job(
 ):
     if not text.strip():
         raise HTTPException(status_code=400, detail="text must not be empty")
-    if not prompt_text.strip():
-        raise HTTPException(status_code=400, detail="prompt_text must not be empty")
     if cfg_value <= 0:
         raise HTTPException(status_code=400, detail="cfg_value must be greater than 0")
     if inference_timesteps <= 0:
@@ -88,9 +70,10 @@ async def _prepare_tts_job(
 @app.post("/tts/process")
 async def process_tts_stream(
     text: str = Form(...),
-    prompt_text: str = Form(...),
+    prompt_text: str = Form(""),
     prompt_wav: UploadFile = File(...),
     reference_wav: Optional[UploadFile] = File(None),
+    control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
     inference_timesteps: int = Form(10),
 ):
@@ -138,6 +121,7 @@ async def process_tts_stream(
                 prompt_text=prompt_text,
                 prompt_wav_path=prompt_wav_path,
                 reference_wav_path=ref_wav_path,
+                control_instruction=control_instruction,
                 cfg_value=cfg_value,
                 inference_timesteps=inference_timesteps,
             )
@@ -178,9 +162,10 @@ async def process_tts_stream(
 async def submit_tts_job(
     background_tasks: BackgroundTasks,
     text: str = Form(...),
-    prompt_text: str = Form(...),
+    prompt_text: str = Form(""),
     prompt_wav: UploadFile = File(...),
     reference_wav: Optional[UploadFile] = File(None),
+    control_instruction: str = Form(""),
     cfg_value: float = Form(2.0),
     inference_timesteps: int = Form(10),
 ):
@@ -201,6 +186,7 @@ async def submit_tts_job(
         prompt_text=prompt_text,
         prompt_wav_path=prompt_wav_path,
         reference_wav_path=ref_wav_path,
+        control_instruction=control_instruction,
         cfg_value=cfg_value,
         inference_timesteps=inference_timesteps,
     )
@@ -246,41 +232,24 @@ async def download_result(job_id: str):
 
 @app.post("/tts/generate")
 async def tts_run(payload: TTSRequest):
-    start_time = time.perf_counter()
     try:
-        output_path = BASE_DIR / payload.output_file
-        reference_wav_path = BASE_DIR / payload.reference_file
+        output_path = tts_service.resolve_output_file(payload.output_file)
+        reference_wav_path = tts_service.resolve_base_file(payload.reference_file)
 
-        model = VoxCPM.from_pretrained(
-            "openbmb/VoxCPM2", load_denoiser=False, device="cpu"
+        return await tts_service.generate_to_file(
+            text=payload.text,
+            output_path=output_path,
+            reference_wav_path=reference_wav_path,
+            control_instruction=payload.control_instruction,
+            cfg_value=payload.cfg_value,
+            inference_timesteps=payload.inference_timesteps,
         )
 
-        text = "មនុស្សជាច្រើនប្រហែលជាភ្ញាក់ផ្អើលថា តើកីឡាករដែលទទួលបានពានរង្វាន់ច្រើនបំផុតនៅក្នុងប្រវត្តិសាស្ត្រលីគមិនបានចំណាយពេលអាជីពទាំងមូលរបស់លោកនៅ Boston ទេឬ?"
-        # control_instruction = "A young girl with a soft, sweet voice. Speaks slowly with a melancholic, slightly tsundere tone"
-        control_instruction = ""
-
-        generation_kwargs: dict[str, Any] = {
-            "text": f"({payload.control_instruction}){payload.text}",
-            "cfg_value": payload.cfg_value,
-            "inference_timesteps": payload.inference_timesteps,
-            "reference_wav_path": reference_wav_path,
-        }
-
-        wav = model.generate(**generation_kwargs)
-
-        sf.write(output_path, wav, model.tts_model.sample_rate)
-
-        process_time = time.perf_counter() - start_time
-
-        return {
-            "success": True,
-            "process_time_seconds": round(process_time, 3),
-            "reference_file": str(reference_wav_path),
-            "output_file": str(output_path),
-        }
-
-    except ModuleNotFoundError as error:
-        raise RuntimeError("voxcpm is not installed") from error
+    except (FileNotFoundError, ValueError) as error:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "error": str(error)},
+        )
     except Exception as error:
         raise HTTPException(
             status_code=500,

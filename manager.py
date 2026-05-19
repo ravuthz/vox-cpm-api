@@ -1,38 +1,17 @@
 import os
 import uuid
-import asyncio
 import logging
 from typing import Dict, Optional
 from schemas import JobStatus
-import soundfile as sf
-import numpy as np
+from service import tts_service
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-MOCK_ENV_VALUES = {"1", "true", "yes", "on"}
-FORCE_MOCK = os.getenv("VOXCPM_MOCK", "").lower() in MOCK_ENV_VALUES
-
-
-# Try to import VoxCPM, use a mock if not available
-if FORCE_MOCK:
-    MODEL_AVAILABLE = False
-    logger.warning("VOXCPM_MOCK is enabled. Running in MOCK mode.")
-else:
-    try:
-        from voxcpm import VoxCPM
-        import torch
-
-        MODEL_AVAILABLE = True
-    except ImportError:
-        MODEL_AVAILABLE = False
-        logger.warning("VoxCPM or torch not found. Running in MOCK mode.")
-
 
 class JobManager:
     def __init__(self, output_dir: str = "outputs", upload_dir: str = "uploads"):
-        global MODEL_AVAILABLE
         self.jobs: Dict[str, Dict] = {}
         # Use absolute paths for reliability
         self.output_dir = os.path.abspath(output_dir)
@@ -40,32 +19,20 @@ class JobManager:
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.upload_dir, exist_ok=True)
 
-        self.mock_mode = FORCE_MOCK
-        try:
-            self.mock_delay = max(0.0, float(os.getenv("VOXCPM_MOCK_DELAY", "5")))
-        except ValueError:
-            logger.warning("Invalid VOXCPM_MOCK_DELAY value. Using 5 seconds.")
-            self.mock_delay = 5.0
+    @property
+    def model_available(self) -> bool:
+        return tts_service.model_available
 
-        self.device = "cpu"
-        if MODEL_AVAILABLE:
-            if torch.cuda.is_available():
-                self.device = "cuda"
-            elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-                self.device = "mps"
-            logger.info(f"Device detected: {self.device}")
+    @property
+    def model_loaded(self) -> bool:
+        return tts_service.model_loaded
 
-        self.model = None
-        if MODEL_AVAILABLE:
-            try:
-                # Disable denoiser due to environment dependency issues (torchvision::nms)
-                self.model = VoxCPM.from_pretrained(
-                    "openbmb/VoxCPM2", load_denoiser=False, device=self.device
-                )
-                logger.info("VoxCPM model loaded successfully (denoiser disabled).")
-            except Exception as e:
-                logger.error(f"Failed to load VoxCPM model: {e}")
-                MODEL_AVAILABLE = False
+    @property
+    def device(self) -> str:
+        return tts_service.device
+
+    async def ensure_model_loaded(self) -> bool:
+        return await tts_service.ensure_model_loaded()
 
     async def create_job(self) -> str:
         job_id = str(uuid.uuid4())
@@ -93,6 +60,31 @@ class JobManager:
     def get_job_status(self, job_id: str) -> Optional[Dict]:
         return self.jobs.get(job_id)
 
+    async def synthesize_to_file(
+        self,
+        job_id: str,
+        text: str,
+        prompt_text: str,
+        prompt_wav_path: str,
+        reference_wav_path: str = None,
+        control_instruction: str = "",
+        cfg_value: float = 2.0,
+        inference_timesteps: int = 10,
+    ) -> str:
+        output_filename = f"{job_id}.wav"
+        output_path = os.path.join(self.output_dir, output_filename)
+        reference_path = reference_wav_path or prompt_wav_path
+
+        await tts_service.generate_to_file(
+            text=text,
+            output_path=output_path,
+            reference_wav_path=reference_path,
+            control_instruction=control_instruction,
+            cfg_value=cfg_value,
+            inference_timesteps=inference_timesteps,
+        )
+        return output_path
+
     async def process_tts(
         self,
         job_id: str,
@@ -100,40 +92,23 @@ class JobManager:
         prompt_text: str,
         prompt_wav_path: str,
         reference_wav_path: str = None,
+        control_instruction: str = "",
         cfg_value: float = 2.0,
         inference_timesteps: int = 10,
     ):
         self.update_job(job_id, JobStatus.PROCESSING)
 
         try:
-            output_filename = f"{job_id}.wav"
-            output_path = os.path.join(self.output_dir, output_filename)
-
-            if MODEL_AVAILABLE and self.model:
-                # Real inference
-                # Note: VoxCPM.generate is likely CPU/GPU intensive, should ideally run in a threadpool
-                loop = asyncio.get_running_loop()
-                wav = await loop.run_in_executor(
-                    None,
-                    lambda: self.model.generate(
-                        text=text,
-                        prompt_wav_path=prompt_wav_path,
-                        prompt_text=prompt_text,
-                        reference_wav_path=reference_wav_path or prompt_wav_path,
-                        cfg_value=cfg_value,
-                        inference_timesteps=inference_timesteps,
-                    ),
-                )
-                sf.write(output_path, wav, self.model.tts_model.sample_rate)
-            else:
-                # Mock inference
-                logger.info(f"MOCK processing job {job_id} for text: {text[:50]}...")
-                if self.mock_delay > 0:
-                    await asyncio.sleep(self.mock_delay)  # Simulate processing time
-                # Create a dummy wav file
-                dummy_wav = np.random.uniform(-1, 1, 44100 * 2)  # 2 seconds of noise
-                sf.write(output_path, dummy_wav, 44100)
-
+            output_path = await self.synthesize_to_file(
+                job_id=job_id,
+                text=text,
+                prompt_text=prompt_text,
+                prompt_wav_path=prompt_wav_path,
+                reference_wav_path=reference_wav_path,
+                control_instruction=control_instruction,
+                cfg_value=cfg_value,
+                inference_timesteps=inference_timesteps,
+            )
             self.update_job(job_id, JobStatus.COMPLETED, result_path=output_path)
             logger.info(f"Job {job_id} completed successfully.")
 

@@ -19,6 +19,16 @@ class JobResponse(BaseModel):
 
 class UltimateCloningParams(BaseModel):
     text: str
-    prompt_text: str
+    prompt_text: str = ""
+    control_instruction: str = ""
     cfg_value: float = 2.0
     inference_timesteps: int = 10
+
+
+class TTSRequest(BaseModel):
+    text: str
+    reference_file: str = "clone-voice.mp3"
+    control_instruction: str = ""
+    cfg_value: float = 2.0
+    inference_timesteps: int = 10
+    output_file: str = "result.wav"
